@@ -1,20 +1,47 @@
-import * as async from 'async';
-import {check} from "./playvr-checker";
+import * as debug from 'debug';
+import {ApiClient, IApiEvent} from "./api-client";
+import {AbstractTracker, ITrackerStatus, PlayvrTracker} from "./tracker";
+import {createConfigurationFromEnvs} from "./config";
 
-check('http://86.57.157.90:8084').then((res) => {
-	console.log(res)
-}).catch((err) => {
-	console.error(err);
+const logger = debug('app');
+
+// bootstrap configuration from environmental variables
+const config = createConfigurationFromEnvs();
+logger('Configuration for app: %o', config);
+
+const apiClient = new ApiClient(config.serverUri, config.serverToken, {
+	...(config.serverRetryInterval ? {retryInterval: config.serverRetryInterval} : {}),
+	...(config.serverRequestTimeout ? {requestTimeout: config.serverRequestTimeout} : {}),
+	...(config.serverBatchSize ? {batchSize: config.serverBatchSize} : {}),
 });
 
+config.machines
+	.map((spec) => {
+		let tracker: AbstractTracker;
+		switch (spec.type) {
+			case "playvr":
+				tracker = new PlayvrTracker(spec.id, spec.address);
+				break;
+			case "polygon":
+			default:
+				throw new Error('Unsupported machine type: ' + spec.type);
+		}
 
-async.forever(async (next) => {
-	console.log('Flushing');
+		tracker.on('status', (status: ITrackerStatus) => {
+			return apiClient.send({
+				id: 'someId',
+				sub_id: status.id,
+				type: spec.type as IApiEvent['type'],
 
-	setTimeout(next, 1000);
-}, (err) => {
-	console.error(err);
-});
+				// game is optional
+				...(status.game ? {game: {id: status.game, name: status.game}} : {}),
 
+				status: status.status,
+				timestamp: status.timestamp,
+				local_timestamp: new Date(),
+				sandbox: true,
+			});
+		});
 
-
+		return tracker;
+	});

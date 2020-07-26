@@ -17,3 +17,5 @@ RUN npm install /*.tgz
 WORKDIR node_modules/@teleport-park/tracker-tng
 
 CMD npm start
+
+FROM node:12 AS run-encrypted
